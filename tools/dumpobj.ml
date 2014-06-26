@@ -172,14 +172,15 @@ let print_getglobal_name ic =
         | Reloc_literal sc -> print_struct_const sc
         | _ -> print_string "<wrong reloc>"
     with Not_found ->
-      print_string "<no reloc>"
+      let off = (pos_in ic - !start) in
+        print_string ("Reloc: not found:" ^ (string_of_int off))
     end;
     ignore (inputu ic);
   end
   else begin
     let n = inputu ic in
     if n >= Array.length !globals || n < 0
-    then print_string "<global table overflow>"
+    then print_string ("<global table overflow> n=" ^ (string_of_int n))
     else match !globals.(n) with
            Global id -> print_string(Ident.name id)
          | Constant obj -> print_obj obj
@@ -190,38 +191,40 @@ let print_setglobal_name ic =
   if !objfile then begin
     begin try
       match find_reloc ic with
-        Reloc_setglobal id -> print_string (Ident.name id)
-      | _ -> print_string "<wrong reloc>"
+        Reloc_setglobal id -> print_string ("Reloc: " ^ (Ident.name id))
+      | _ -> print_string "Reloc: setglobal mismatch"
     with Not_found ->
-      print_string "<no reloc>"
+      let off = (pos_in ic - !start) in
+        print_string ("Reloc: not found:" ^ (string_of_int off))
     end;
     ignore (inputu ic);
   end
   else begin
     let n = inputu ic in
     if n >= Array.length !globals || n < 0
-    then print_string "<global table overflow>"
+    then print_string ("<global table overflow> n=" ^ (string_of_int n))
     else match !globals.(n) with
-           Global id -> print_string(Ident.name id)
-         | _ -> print_string "???"
+           Global id -> print_string ("Global: " ^ (Ident.name id))
+         | _ -> print_string "Global: ???"
   end
 
 let print_primitive ic =
   if !objfile then begin
     begin try
       match find_reloc ic with
-        Reloc_primitive s -> print_string s
-      | _ -> print_string "<wrong reloc>"
+        Reloc_primitive s -> print_string ("Reloc: " ^ s)
+      | _ -> print_string "Reloc: primitive mismatch"
     with Not_found ->
-      print_string "<no reloc>"
+      let off = (pos_in ic - !start) in
+        print_string ("Reloc: not found:" ^ (string_of_int off))
     end;
     ignore (inputu ic);
   end
   else begin
     let n = inputu ic in
     if n >= Array.length !primitives || n < 0
-    then print_int n
-    else print_string !primitives.(n)
+    then print_string ("<primitive table overflow> n=" ^ (string_of_int n))
+    else print_string ("Primitive: " ^ !primitives.(n))
   end
 
 (* Disassemble one instruction *)
@@ -465,10 +468,18 @@ let print_instr ic =
 (* Disassemble a block of code *)
 
 let print_code ic len =
+  print_string "//PRINT_CODE LEN:";  print_int len; print_string "//";
   start := pos_in ic;
+  print_string "//PRINT_CODE START:";  print_int !start; print_string "//";
   let stop = !start + len in
+  print_string "//PRINT_CODE STOP:";  print_int stop; print_string "//\n";
   while pos_in ic < stop do print_instr ic done
 
+(* Dump imports info *)
+
+let print_import (name,crc) =
+  printf "    %-15s (%s)    \n" name (Digest.to_hex crc)
+  
 (* Dump relocation info *)
 
 let print_reloc (info, pos) =
@@ -486,6 +497,7 @@ let dump_obj filename ic =
   if buffer <> cmo_magic_number then begin
     prerr_endline "Not an object file"; exit 2
   end;
+  objfile := true;
   let cu_pos = input_binary_int ic in
   seek_in ic cu_pos;
   let cu = (input_value ic : compilation_unit) in
@@ -497,7 +509,13 @@ let dump_obj filename ic =
     record_events 0 evl
   end;
   seek_in ic cu.cu_pos;
-  print_code ic cu.cu_codesize
+  print_code ic cu.cu_codesize;
+  print_string "//RELOCATION LIST//\n";
+  List.iter (fun x -> print_reloc x) cu.cu_reloc;
+  print_string "//IMPORTS LIST//\n";
+  List.iter (fun x -> print_import x) cu.cu_imports;
+  print_string "//PRIMITIVES LIST//\n";
+  List.iter (fun x -> print_string ("    " ^ x ^ "\n")) cu.cu_primitives
 
 (* Read the primitive table from an executable *)
 
@@ -513,7 +531,23 @@ let read_primitive_table ic len =
 
 (* Print an executable file *)
 
+let print_globals arr =
+  let inner_print = function
+	  Empty -> print_string "<empty>"
+	| Global id -> print_string "Global:"; print_string (Ident.name id)
+	| Constant o -> print_string "Constant:"; print_obj o
+  in
+  print_string "//GLOBALS LIST (Globals from SYMB, Constants from DATA sections)//\n";
+	Array.iteri (fun i a -> Printf.printf "%8d  " i;
+		inner_print a;
+		print_string "\n") arr
+	  
+let print_primitives ps =
+  print_string "//PRIMITIVES LIST//\n";
+  Array.iteri (fun i p -> Printf.printf "%8d  %s\n" i p) ps
+
 let dump_exe ic =
+  objfile := false;
   Bytesections.read_toc ic;
   let prim_size = Bytesections.seek_section ic "PRIM" in
   primitives := read_primitive_table ic prim_size;
@@ -538,32 +572,7 @@ let dump_exe ic =
   with Not_found -> ()
   end;
   let code_size = Bytesections.seek_section ic "CODE" in
-  print_code ic code_size
+  print_code ic code_size;
+  print_primitives !primitives;
+  print_globals !globals
 
-let arg_list = [
-  "-noloc", Arg.Clear print_locations, " : don't print source information";
-]
-let arg_usage =
-  Printf.sprintf "%s [OPTIONS] FILES : dump content of bytecode files"
-                 Sys.argv.(0)
-
-let first_file = ref true
-
-let arg_fun filename =
-  let ic = open_in_bin filename in
-  if not !first_file then print_newline ();
-  first_file := false;
-  printf "## start of ocaml dump of %S\n%!" filename;
-  begin try
-          objfile := false; dump_exe ic
-    with Bytesections.Bad_magic_number ->
-      objfile := true; seek_in ic 0; dump_obj filename ic
-  end;
-  close_in ic;
-  printf "## end of ocaml dump of %S\n%!" filename
-
-let main() =
-  Arg.parse arg_list arg_fun arg_usage;
-    exit 0
-
-let _ = main ()

@@ -101,6 +101,7 @@ stdlib/camlheader_ur
 stdlib/camlheaderd
 stdlib/sys.ml
 tools/cvt_emit.bak
+tools/dumpcmi
 tools/dumpobj
 tools/objinfo
 tools/objinfo_helper

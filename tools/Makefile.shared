@@ -18,10 +18,10 @@ CAMLOPT=$(CAMLRUN) ../ocamlopt -nostdlib -I ../stdlib
 CAMLLEX=$(CAMLRUN) ../boot/ocamllex
 INCLUDES=-I ../utils -I ../parsing -I ../typing -I ../bytecomp -I ../asmcomp \
 	 -I ../driver -I ../toplevel
-COMPFLAGS= -w +32..39 -warn-error A $(INCLUDES)
+COMPFLAGS= -w +32..39-40 -warn-error A $(INCLUDES)
 LINKFLAGS=$(INCLUDES)
 
-all: ocamldep ocamlprof ocamlcp ocamloptp ocamlmktop ocamlmklib dumpobj \
+all: ocamldep ocamlprof ocamlcp ocamloptp ocamlmktop ocamlmklib dumpobj dumpcmi \
      objinfo read_cmt
 
 all: tast_iter.cmo
@@ -247,15 +247,25 @@ beforedepend::
 
 # The bytecode disassembler
 
-DUMPOBJ=opnames.cmo dumpobj.cmo
+DUMPOBJ=opnames.cmo dumpobj.cmo dumpobj_main.cmo
 
 dumpobj: $(DUMPOBJ)
 	$(CAMLC) $(LINKFLAGS) -o dumpobj \
-	         misc.cmo tbl.cmo config.cmo ident.cmo \
-	         opcodes.cmo bytesections.cmo $(DUMPOBJ)
+		misc.cmo tbl.cmo config.cmo ident.cmo \
+		opcodes.cmo bytesections.cmo $(DUMPOBJ)
 
+dumpcmi: dumpcmi.cmo
+	$(CAMLC) $(LINKFLAGS) -o $@ \
+		ident.cmo tbl.cmo path.cmo misc.cmo types.cmo btype.cmo \
+		warnings.cmo location.cmo config.cmo clflags.cmo \
+		ast_helper.cmo ast_mapper.cmo subst.cmo \
+		predef.cmo datarepr.cmo cmi_format.cmo consistbl.cmo \
+		longident.cmo env.cmo ctype.cmo oprint.cmo primitive.cmo \
+		printtyp.cmo lexer.cmo typedtreeMap.cmo cmt_format.cmo \
+		$<
+        
 clean::
-	rm -f dumpobj
+	rm -f dumpobj dumpcmi
 
 opnames.ml: ../byterun/instruct.h
 	unset LC_ALL || : ; \
